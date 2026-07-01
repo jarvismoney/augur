@@ -21,7 +21,9 @@ from augur.scoring import (
     interpret_coverage,
     log_score,
     murphy_decomposition,
+    summarize,
     uncertainty,
+    wilson_interval,
 )
 
 
@@ -136,6 +138,80 @@ def test_compute_stats_bundle():
     assert len(stats.bins) == 10
     # overconfidence is confidence minus accuracy
     assert stats.overconfidence == pytest.approx(stats.mean_confidence - stats.accuracy)
+
+
+def test_wilson_interval_bounds_and_width():
+    lo, hi = wilson_interval(5, 10)
+    assert 0.0 <= lo < 0.5 < hi <= 1.0
+    # Empty -> maximal ignorance.
+    assert wilson_interval(0, 0) == (0.0, 1.0)
+    # All successes: high pinned near 1, low well below 1.
+    lo2, hi2 = wilson_interval(10, 10)
+    assert hi2 == pytest.approx(1.0, abs=1e-3)
+    assert lo2 < 1.0
+    # Less data => wider interval.
+    small = wilson_interval(1, 2)
+    big = wilson_interval(50, 100)
+    assert (small[1] - small[0]) > (big[1] - big[0])
+
+
+def test_bin_significance_requires_enough_data():
+    # 1/2 observed with a 0.9 forecast: suggestive but too little data.
+    bins = calibration_bins([(0.9, 1), (0.9, 0)], n_bins=10)
+    assert bins[9].is_significant() is False
+    # 0/10 observed against a 0.9 forecast: clearly, significantly miscalibrated.
+    bins2 = calibration_bins([(0.9, 0)] * 10, n_bins=10)
+    assert bins2[9].is_significant() is True
+
+
+def test_summarize_small_sample():
+    stats = compute_stats([(0.7, 1), (0.3, 0)], n_bins=10)
+    insight = summarize(stats, min_n=10)
+    assert insight.tone == "info"
+    assert "warming up" in insight.headline.lower()
+
+
+def test_summarize_overconfident():
+    pairs = [(0.9, 1)] * 10 + [(0.9, 0)] * 10  # felt 90%, right 50%
+    insight = summarize(compute_stats(pairs, n_bins=10))
+    assert insight.tone == "warn"
+    assert "overconfident" in insight.headline.lower()
+    assert insight.takeaways  # has at least one concrete takeaway
+
+
+def test_summarize_underconfident():
+    pairs = [(0.6, 1)] * 20  # hedged at 60% but always right
+    insight = summarize(compute_stats(pairs, n_bins=10))
+    assert insight.tone == "warn"
+    assert "underconfident" in insight.headline.lower()
+
+
+def test_summarize_well_calibrated():
+    pairs = [(0.7, 1)] * 7 + [(0.7, 0)] * 3  # 70% forecasts happen 70%
+    insight = summarize(compute_stats(pairs, n_bins=10))
+    assert insight.tone == "good"
+    assert "calibrated" in insight.headline.lower()
+    assert len(insight.takeaways) <= 2
+
+
+def test_summarize_mixed_direction_is_not_contradictory():
+    # Underconfident on average, but a significant *over*confident high-prob bin.
+    # The verdict must not simply say "be bolder" while flagging overconfidence.
+    pairs = [(0.55, 1)] * 20 + [(0.90, 0)] * 8
+    insight = summarize(compute_stats(pairs, n_bins=10))
+    h = insight.headline.lower()
+    assert "in places" in h and "overconfident" in h
+    assert insight.headline != "You lean underconfident — you know more than you let on."
+
+
+def test_summarize_weak_area_phrasing_unambiguous_for_low_bins():
+    # Events in a 0-10% bin all happened: must read as "happened", not
+    # "came true" (which would sound like vindication).
+    pairs = [(0.05, 1)] * 12 + [(0.5, 1), (0.5, 0)] * 4
+    insight = summarize(compute_stats(pairs, n_bins=10))
+    joined = " ".join(insight.takeaways).lower()
+    assert "came true" not in joined
+    assert "happened" in joined
 
 
 def test_interval_coverage_and_interpretation():

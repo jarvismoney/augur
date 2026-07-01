@@ -100,6 +100,53 @@ def test_edit_updates_fields(dbfile, capsys):
     assert data["probability"] == pytest.approx(0.9)
 
 
+def test_score_json_has_insight(dbfile, capsys):
+    run(dbfile, "add", "x", "-p", "60")
+    run(dbfile, "resolve", "1", "yes")
+    capsys.readouterr()
+    assert run(dbfile, "score", "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert "insight" in data
+    assert data["insight"]["tone"] in ("good", "warn", "info")
+    assert data["insight"]["headline"]
+
+
+def test_score_leads_with_plain_english(dbfile, capsys):
+    run(dbfile, "add", "x", "-p", "60")
+    run(dbfile, "resolve", "1", "yes")
+    capsys.readouterr()
+    assert run(dbfile, "score") == 0
+    # Few forecasts => a friendly "warming up" verdict, not just a wall of stats.
+    assert "warming up" in capsys.readouterr().out.lower()
+
+
+def test_confidence_pair_reconstruction():
+    from augur.cli import _confidence_pair_from_row
+    assert _confidence_pair_from_row({"truth": 1.0, "correct": 1, "confidence": 0.8}) == (0.8, 1)
+    assert _confidence_pair_from_row({"truth": 0.0, "correct": 0, "confidence": 0.8}) == (0.8, 0)
+    p, o = _confidence_pair_from_row({"truth": 0.0, "correct": 1, "confidence": 0.9})
+    assert (round(p, 6), o) == (0.1, 0)
+
+
+def test_practice_progress_nudge(dbfile, capsys, monkeypatch):
+    from augur.db import Database
+    from augur.util import now_utc, to_iso
+
+    db = Database(dbfile)
+    db.record_practice([
+        {"session": "s", "mode": "interval", "created_at": to_iso(now_utc()),
+         "confidence": None, "correct": None, "ci_low": 0, "ci_high": 1,
+         "truth": 1, "hit": 1 if i < 3 else 0}
+        for i in range(6)
+    ])
+    db.close()
+
+    answers = iter(["0 1000", "q"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    assert run(dbfile, "practice", "--mode", "interval", "-n", "2", "--seed", "1", "--no-save") == 0
+    assert "earlier answers" in capsys.readouterr().out
+
+
 def test_import_skips_malformed_entries(dbfile, tmp_path, capsys):
     # Regression: a non-object element used to crash import with a traceback.
     bad = tmp_path / "bad.json"

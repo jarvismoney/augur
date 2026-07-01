@@ -163,6 +163,37 @@ class Bin:
     def midpoint(self) -> float:
         return (self.low + self.high) / 2
 
+    def observed_ci(self, z: float = 1.96) -> tuple[float, float]:
+        """Wilson score interval for the observed frequency in this bin."""
+        return wilson_interval(self.sum_outcome, self.count, z)
+
+    def is_significant(self, z: float = 1.96, min_count: int = 5) -> bool:
+        """True when the forecast lies outside the observed CI with enough data.
+
+        This is what keeps the plain-English verdict honest: a bin only counts
+        as "miscalibrated" if the gap is unlikely to be sampling noise.
+        """
+        if self.count < min_count:
+            return False
+        low, high = self.observed_ci(z)
+        return not (low <= self.mean_pred <= high)
+
+
+def wilson_interval(successes: float, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson score confidence interval for a binomial proportion.
+
+    More trustworthy than the naive normal interval at small ``n`` and near 0/1
+    (it never runs off the [0, 1] edge). ``z=1.96`` is a 95% interval.
+    """
+    if n <= 0:
+        return (0.0, 1.0)
+    phat = successes / n
+    z2 = z * z
+    denom = 1 + z2 / n
+    center = (phat + z2 / (2 * n)) / denom
+    margin = (z / denom) * math.sqrt(phat * (1 - phat) / n + z2 / (4 * n * n))
+    return (max(0.0, center - margin), min(1.0, center + margin))
+
 
 def calibration_bins(pairs: Sequence[Pair], n_bins: int = 10) -> list[Bin]:
     """Partition forecasts into ``n_bins`` equal-width probability buckets.
@@ -293,6 +324,104 @@ def compute_stats(pairs: Sequence[Pair], n_bins: int = 10) -> Stats:
         accuracy=acc,
         bins=calibration_bins(pairs, n_bins),
     )
+
+
+# ---------------------------------------------------------------------------
+# Plain-English summary
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Insight:
+    """A human summary of a calibration report: one headline, a few takeaways."""
+
+    headline: str
+    tone: str  # "good" | "warn" | "info"
+    takeaways: list[str]
+
+
+def summarize(stats: Stats, min_n: int = 10) -> Insight:
+    """Turn a Stats bundle into a short, honest, plain-English read.
+
+    The point is to answer "am I calibrated, and where am I going wrong?" in a
+    sentence or two. Region call-outs only fire when they are statistically
+    significant (Wilson interval), so we never scold the user over noise.
+    """
+    n = stats.n
+    conf_pct = round(stats.mean_confidence * 100)
+    acc_pct = round(stats.accuracy * 100)
+
+    if n < min_n:
+        plural = "s" if n != 1 else ""
+        return Insight(
+            headline=f"Still warming up — only {n} forecast{plural} scored.",
+            tone="info",
+            takeaways=[
+                "Calibration needs volume; keep logging and resolving to get a real read."
+            ],
+        )
+
+    oc = stats.overconfidence
+
+    # Find the worst statistically-significant region first, so the headline
+    # and the region call-out can never point in opposite directions (you can
+    # be underconfident on average yet badly overconfident in one region).
+    worst = None
+    worst_gap = 0.0
+    for b in stats.bins:
+        if b.is_significant():
+            gap = abs(b.mean_pred - b.observed)
+            if gap > worst_gap:
+                worst_gap = gap
+                worst = b
+    worst_dir = None
+    if worst is not None:
+        worst_dir = "over" if worst.mean_pred > worst.observed else "under"
+
+    if abs(oc) <= 0.04:
+        agg = "calibrated"
+    elif oc > 0.04:
+        agg = "over"
+    else:
+        agg = "under"
+
+    if agg == "calibrated":
+        if worst is None:
+            headline = "Well calibrated — your confidence lines up with reality."
+            tone = "good"
+        else:
+            headline = "Mostly calibrated, but one area stands out — see below."
+            tone = "warn"
+    else:
+        tone = "warn"
+        directional = "overconfident" if agg == "over" else "underconfident"
+        if worst is not None and worst_dir != agg:
+            opposite = "underconfident" if agg == "over" else "overconfident"
+            headline = (
+                f"You lean {directional} overall, but {opposite} in places — see below."
+            )
+        elif agg == "over":
+            headline = "You lean overconfident — surer than the outcomes justify."
+        else:
+            headline = "You lean underconfident — you know more than you let on."
+
+    takeaways = [
+        f"On average you felt {conf_pct}% sure and were right {acc_pct}% of the time."
+    ]
+    if worst is not None:
+        # Phrase in terms of the events, not "the forecast came true", so it
+        # reads correctly for both low- and high-probability regions.
+        takeaways.append(
+            f"Weakest area: your {round(worst.low * 100)}-{round(worst.high * 100)}% "
+            f"forecasts — you said about {round(worst.mean_pred * 100)}% but they "
+            f"happened {round(worst.observed * 100)}% of the time."
+        )
+    elif stats.uncertainty > 0 and stats.resolution < 0.2 * stats.uncertainty:
+        takeaways.append(
+            "You rarely stray far from 50% — when you truly have an edge, be bolder."
+        )
+
+    return Insight(headline=headline, tone=tone, takeaways=takeaways[:2])
 
 
 # ---------------------------------------------------------------------------

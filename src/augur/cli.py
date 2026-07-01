@@ -25,6 +25,7 @@ import json
 import math
 import random
 import sys
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
@@ -35,7 +36,7 @@ from . import practice as practice_mod
 from . import terminal as t
 from .db import Database
 from .models import Outcome, Prediction, normalize_tags
-from .scoring import compute_stats, pairs_from_predictions
+from .scoring import brier_score, compute_stats, pairs_from_predictions, summarize
 from .util import (
     DateParseError,
     ProbabilityError,
@@ -324,16 +325,70 @@ def cmd_score(args, db: Database) -> int:
         return 0
 
     stats = compute_stats(pairs, n_bins=args.bins)
+    insight = summarize(stats)
     if args.json:
-        print(json.dumps(_stats_to_dict(stats), indent=2))
+        payload = _stats_to_dict(stats)
+        payload["insight"] = {
+            "headline": insight.headline,
+            "tone": insight.tone,
+            "takeaways": insight.takeaways,
+        }
+        print(json.dumps(payload, indent=2))
         return 0
 
-    _print_stats(stats, title=_score_title(args))
+    print(t.heading(_score_title(args)))
+    _print_insight(insight, db, since, args)
+    print()
+    _print_stats(stats, title=None)
     print()
     print(charts.reliability_curve(stats.bins))
     print()
     print(charts.calibration_table(stats.bins))
     return 0
+
+
+def _print_insight(insight, db: Database, since, args) -> None:
+    """Lead the report with a short, plain-English read of the numbers."""
+    tone_color = {"good": "green", "warn": "yellow", "info": "cyan"}.get(
+        insight.tone, "cyan"
+    )
+    print("  " + t.style(insight.headline, tone_color, "bold"))
+    for line in insight.takeaways:
+        print("  " + t.dim("· ") + line)
+    topic = _weakest_topic_line(db, since, args)
+    if topic:
+        print("  " + t.dim("· ") + topic)
+
+
+def _weakest_topic_line(db: Database, since, args) -> Optional[str]:
+    """Name the least-calibrated tag, but only when the signal is clear.
+
+    Fires only if you're not already filtering by a tag, there are several
+    well-populated topics, and one is meaningfully worse than your average --
+    otherwise it stays quiet rather than adding noise.
+    """
+    if getattr(args, "tag", None):
+        return None
+    preds = db.scorable(since=since)
+    if len(preds) < 16:
+        return None
+    groups = defaultdict(list)
+    for p in preds:
+        pair = (p.probability, p.outcome.as_binary())
+        for tag in p.tags:
+            groups[tag].append(pair)
+    qualifying = {tag: prs for tag, prs in groups.items() if len(prs) >= 8}
+    if len(qualifying) < 2:
+        return None
+    overall = brier_score([(p.probability, p.outcome.as_binary()) for p in preds])
+    worst = max(qualifying, key=lambda tag: brier_score(qualifying[tag]))
+    worst_brier = brier_score(qualifying[worst])
+    if worst_brier > overall + 0.08:
+        return (
+            f"Weakest topic: #{worst} (brier {worst_brier:.2f} vs "
+            f"{overall:.2f} overall)."
+        )
+    return None
 
 
 def cmd_trend(args, db: Database) -> int:
@@ -515,6 +570,9 @@ def _practice_interval(args, db: Database, rng: random.Random) -> int:
     print(f"  your 90% ranges contained the truth {t.bold(pct)} of the time "
           f"({report.hits}/{report.n})")
     print("  " + t.style(report.verdict, color))
+    note = _interval_progress_note(db, report.coverage)
+    if note:
+        print("  " + t.dim(note))
     if not args.no_save:
         _save_interval(db, results)
     return 0
@@ -555,9 +613,53 @@ def _practice_confidence(args, db: Database, rng: random.Random) -> int:
     _print_stats(stats, title=None)
     print()
     print(charts.calibration_table(stats.bins))
+    note = _confidence_progress_note(db, stats.brier)
+    if note:
+        print("  " + t.dim(note))
     if not args.no_save:
         _save_confidence(db, results)
     return 0
+
+
+def _interval_progress_note(db: Database, coverage: float) -> Optional[str]:
+    """One-line 'are you improving?' nudge from past interval answers.
+
+    Read before the current session is saved, so it compares today against
+    your prior history. Silent until there's enough history to be worth it.
+    """
+    rows = db.practice_rows(mode="interval")
+    if len(rows) < 5:
+        return None
+    prior = sum(r["hit"] for r in rows) / len(rows)
+    return (
+        f"across {len(rows)} earlier answers your 90% ranges held "
+        f"{round(prior * 100)}%; today {round(coverage * 100)}%."
+    )
+
+
+def _confidence_progress_note(db: Database, brier: float) -> Optional[str]:
+    rows = db.practice_rows(mode="confidence")
+    if len(rows) < 5:
+        return None
+    pairs = [_confidence_pair_from_row(r) for r in rows]
+    prior = brier_score(pairs)
+    trend = "better" if brier < prior - 0.005 else "worse" if brier > prior + 0.005 else "about the same"
+    return f"your practice Brier was {prior:.2f} before; today {brier:.2f} ({trend})."
+
+
+def _confidence_pair_from_row(row) -> tuple:
+    """Reconstruct (forecast P(true), outcome) from a stored confidence row.
+
+    We persist confidence (of the chosen side), whether it was correct, and the
+    statement's truth value -- which is enough to rebuild the original forecast
+    losslessly for scoring.
+    """
+    answer_true = row["truth"] >= 0.5
+    correct = bool(row["correct"])
+    said_true = answer_true if correct else (not answer_true)
+    confidence = row["confidence"]
+    prob_true = confidence if said_true else 1 - confidence
+    return (prob_true, 1 if answer_true else 0)
 
 
 def _save_interval(db: Database, results) -> None:
@@ -738,6 +840,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="augur",
         description="Log forecasts, resolve them, and train your calibration.",
+        epilog=(
+            "examples:\n"
+            "  augur add \"Bitcoin over $150k by 2026-12-31\" -p 35 --tags crypto\n"
+            "  augur due                  # what needs resolving now\n"
+            "  augur resolve 3 no         # it didn't happen\n"
+            "  augur score                # how calibrated am I?\n"
+            "  augur practice             # train with a quick drill\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"augur {__version__}")
     parser.add_argument("--db", help="path to the database file (default: XDG data dir)")

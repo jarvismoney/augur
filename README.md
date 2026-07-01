@@ -26,6 +26,10 @@ makes you measurably better at decisions. Most tools for this are web services.
 $ augur score
 
 Calibration report
+  You lean overconfident — surer than the outcomes justify.
+  · On average you felt 81% sure and were right 62% of the time.
+  · Weakest area: your 70-80% forecasts — you said about 75% but they happened 30% of the time.
+
   forecasts scored : 60
   brier score      : 0.156   (0 perfect · 0.25 = always 50%)
   brier skill      : +0.369   (vs. always guessing the base rate)
@@ -49,9 +53,15 @@ Calibration report
        forecast probability →  (● you, · ideal)
 ```
 
-Points on the dotted diagonal mean you're perfectly calibrated. Points *below*
-it mean the thing happened less often than you predicted (overconfident);
-*above* means it happened more often (underconfident).
+Every report **leads with plain English** — a one-line verdict and one or two
+specific, honest takeaways — so you get the point without reading a wall of
+statistics. The call-outs only fire when they're statistically significant
+(Wilson intervals), so `augur` won't scold you over three lucky guesses. The
+detailed metrics and the reliability diagram sit below for when you want them.
+
+On the diagram, points on the dotted diagonal mean you're perfectly calibrated.
+Points *below* it mean the thing happened less often than you predicted
+(overconfident); *above* means it happened more often (underconfident).
 
 ## Install
 
@@ -159,7 +169,7 @@ Colour output auto-detects a terminal and honours `NO_COLOR`; force it with
 ## Development
 
 ```bash
-python -m pytest        # 67 tests, no third-party deps required to run the tool
+python -m pytest        # 80 tests, no third-party deps required to run the tool
 ```
 
 The scoring math is covered by tests that pin the Brier/log values and check
