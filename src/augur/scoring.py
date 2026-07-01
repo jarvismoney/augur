@@ -179,7 +179,12 @@ def calibration_bins(pairs: Sequence[Pair], n_bins: int = 10) -> list[Bin]:
         for i in range(n_bins)
     ]
     for p, o in pairs:
-        idx = min(int(p / width), n_bins - 1)
+        # Multiply by n_bins (rather than divide by width) and nudge by a tiny
+        # epsilon before truncating, so exact decile forecasts land in the
+        # intended bucket. Without this, float error puts e.g. 0.7 in [0.6,0.7)
+        # because 0.7 / 0.1 == 6.999999999999999. p == 1.0 still maps to the
+        # top bin thanks to the min() clamp.
+        idx = max(0, min(int(p * n_bins + 1e-9), n_bins - 1))
         b = bins[idx]
         b.count += 1
         b.sum_pred += p

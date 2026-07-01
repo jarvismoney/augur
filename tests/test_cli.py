@@ -100,6 +100,30 @@ def test_edit_updates_fields(dbfile, capsys):
     assert data["probability"] == pytest.approx(0.9)
 
 
+def test_import_skips_malformed_entries(dbfile, tmp_path, capsys):
+    # Regression: a non-object element used to crash import with a traceback.
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps([
+        "not an object",
+        42,
+        None,
+        {"statement": "good one", "probability": 0.7},
+    ]))
+    assert run(dbfile, "import", str(bad)) == 0
+    out = capsys.readouterr()
+    assert "imported 1" in out.out
+    assert "skipping malformed" in out.err
+
+
+def test_score_rejects_nonpositive_bins(dbfile, capsys):
+    run(dbfile, "add", "x", "-p", "60")
+    run(dbfile, "resolve", "1", "yes")
+    capsys.readouterr()
+    assert run(dbfile, "score", "--bins", "0") == 2
+    assert "bins" in capsys.readouterr().err
+    assert run(dbfile, "trend", "--bins", "-1") == 2
+
+
 def test_practice_no_save_with_seed(dbfile, capsys, monkeypatch):
     # Feed answers via a fake input() so the interactive loop is exercised.
     answers = iter(["1900 2000", "q"])

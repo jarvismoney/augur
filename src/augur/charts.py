@@ -30,6 +30,7 @@ def reliability_curve(bins: Sequence[Bin], height: int = 11) -> str:
     n_bins = len(bins)
     if n_bins == 0:
         return "(no data)"
+    height = max(2, height)  # need at least 2 rows for the (height - 1) divisions
 
     grid = [[" "] * n_bins for _ in range(height)]
 

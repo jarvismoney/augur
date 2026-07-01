@@ -71,6 +71,19 @@ def test_calibration_bins_counts_and_top_edge():
     assert sum(b.count for b in bins) == 3
 
 
+def test_calibration_bins_exact_deciles_place_correctly():
+    # Regression: 0.7/0.1 == 6.999... so a naive int() truncation put exact
+    # decile forecasts one bin too low. Each p = i/10 must land in bin i.
+    for i in range(1, 10):
+        p = i / 10
+        bins = calibration_bins([(p, 1)], n_bins=10)
+        placed = [k for k, b in enumerate(bins) if b.count]
+        assert placed == [i], f"p={p} placed in {placed}, expected [{i}]"
+    # And with 5 bins, 0.6 belongs in bin 3 = [0.6, 0.8), not [0.4, 0.6).
+    bins5 = calibration_bins([(0.6, 1)], n_bins=5)
+    assert [k for k, b in enumerate(bins5) if b.count] == [3]
+
+
 def test_calibration_bin_observed_and_mean():
     pairs = [(0.72, 1), (0.78, 0)]  # both in the 70-80% bin
     bins = calibration_bins(pairs, n_bins=10)

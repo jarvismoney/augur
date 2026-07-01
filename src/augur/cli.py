@@ -309,6 +309,9 @@ def cmd_due(args, db: Database) -> int:
 
 
 def cmd_score(args, db: Database) -> int:
+    if args.bins < 1:
+        _eprint(t.red("error: --bins must be >= 1"))
+        return 2
     since = _parse_optional_date(args.since)
     if since is None and args.since:
         return 2
@@ -334,6 +337,9 @@ def cmd_score(args, db: Database) -> int:
 
 
 def cmd_trend(args, db: Database) -> int:
+    if args.bins < 1:
+        _eprint(t.red("error: --bins must be >= 1"))
+        return 2
     preds = [p for p in db.scorable() if p.resolved_at is not None]
     preds.sort(key=lambda p: p.resolved_at or p.created_at)
     if len(preds) < 4:
@@ -421,9 +427,12 @@ def cmd_import(args, db: Database) -> int:
 
     added = 0
     for entry in data:
+        if not isinstance(entry, dict):
+            _eprint(t.yellow("skipping malformed entry: not a JSON object"))
+            continue
         try:
             pred = _prediction_from_dict(entry)
-        except (KeyError, ValueError) as exc:
+        except (KeyError, ValueError, TypeError) as exc:
             _eprint(t.yellow(f"skipping malformed entry: {exc}"))
             continue
         pred.id = None  # let the DB assign fresh ids
