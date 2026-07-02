@@ -65,8 +65,15 @@ Points *below* it mean the thing happened less often than you predicted
 
 ## Install
 
-`augur` needs only Python 3.9+. Clone the repo and either run it in place or
-install the `augur` command:
+`augur` needs only Python 3.9+. The recommended install is
+[pipx](https://pipx.pypa.io/), which gives you an isolated `augur` command:
+
+```bash
+pipx install augur-cli   # once released on PyPI
+augur --help
+```
+
+Or straight from the repo:
 
 ```bash
 # run without installing
@@ -76,6 +83,12 @@ python -m augur --help
 pip install -e .
 augur --help
 ```
+
+> **Name collision note:** the PyPI package is `augur-cli` because
+> [Nextstrain's `augur`](https://github.com/nextstrain/augur) (bioinformatics)
+> already owns the `augur` name on PyPI — and it also installs an `augur`
+> command. If you use Nextstrain, install this tool in its own pipx/venv, or
+> alias the one you use less.
 
 ## Quickstart
 

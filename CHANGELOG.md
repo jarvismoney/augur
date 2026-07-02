@@ -4,6 +4,25 @@ All notable changes to augur are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning.
 
+## [0.3.0]
+
+Focus: public release readiness.
+
+### Added
+- **Much larger practice bank.** The calibration drills now draw from a far
+  bigger pool of fact-checked questions (previously 40 numeric + 35 binary),
+  so the practice range survives more than a few evenings of training.
+- **CI.** GitHub Actions test matrix across Python 3.9–3.13 on Linux, macOS
+  and Windows, plus a wheel/sdist build job.
+- **Windows color support.** ANSI escape processing is enabled on legacy
+  Windows consoles (conhost) at startup; styling degrades gracefully when it
+  can't be.
+- `CONTRIBUTING.md`, pipx install instructions, and a note on the name
+  collision with Nextstrain's `augur` (this package is `augur-cli` on PyPI).
+
+### Fixed
+- Project URLs in packaging metadata pointed at a nonexistent repository.
+
 ## [0.2.0]
 
 Focus: make the calibration report *understandable*, not just accurate.

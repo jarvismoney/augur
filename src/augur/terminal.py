@@ -35,6 +35,34 @@ _CODES = {
 _forced: bool | None = None
 
 
+def _enable_windows_vt() -> bool:
+    """Enable ANSI escape processing on legacy Windows consoles.
+
+    Windows Terminal and most modern shells handle VT sequences natively, but
+    classic conhost (cmd.exe / older PowerShell hosts) needs
+    ENABLE_VIRTUAL_TERMINAL_PROCESSING switched on explicitly. Returns whether
+    VT output can be assumed to work.
+    """
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            # Not a console (redirected); isatty() gates styling anyway.
+            return True
+        # 0x0004 == ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+    except Exception:
+        return False
+
+
+_VT_OK = _enable_windows_vt()
+
+
 def set_color(enabled: bool | None) -> None:
     """Force colour on (True), off (False), or auto-detect (None)."""
     global _forced
@@ -48,6 +76,8 @@ def color_enabled(stream=None) -> bool:
         return False
     if os.environ.get("AUGUR_FORCE_COLOR"):
         return True
+    if not _VT_OK:
+        return False
     stream = stream or sys.stdout
     return bool(getattr(stream, "isatty", lambda: False)())
 
