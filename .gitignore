@@ -22,3 +22,5 @@ venv/
 *.db
 *.db-journal
 /scratch/
+
+.claude
