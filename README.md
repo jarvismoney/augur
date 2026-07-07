@@ -190,6 +190,16 @@ the Murphy decomposition identity exactly. The bundled trivia bank was
 independently verified by a fan-out of web-searching fact-check agents before
 shipping.
 
+## Support
+
+`augur` is free and MIT-licensed, built in the open. If it's useful to you, you
+can support continued development:
+
+- ☕ [Ko-fi](https://ko-fi.com/philippmerz)
+- 💜 [GitHub Sponsors](https://github.com/sponsors/jarvismoney)
+
+Or just star the repo and pass it to someone who keeps a forecasting journal.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
