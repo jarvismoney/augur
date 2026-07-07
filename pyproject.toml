@@ -30,6 +30,9 @@ Changelog = "https://github.com/jarvismoney/augur/blob/main/CHANGELOG.md"
 
 [project.scripts]
 augur = "augur.cli:main"
+# Collision-safe alias: `augur` may clash with Nextstrain's `augur` in a shared
+# environment; `augur-cli` always resolves to this tool.
+augur-cli = "augur.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
